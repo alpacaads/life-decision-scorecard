@@ -8,50 +8,67 @@ st.set_page_config(page_title="Decision Engine", page_icon="🧭")
 # -----------------------
 # CONFIG
 # -----------------------
-PILLARS = ["Security", "Energy", "Meaning / Fulfilment", "Connection", "Freedom / Optionality"]
-SCORES = [-2, -1, 0, 1, 2]
+PILLARS = [
+    "Security",
+    "Energy",
+    "Meaning / Fulfilment",
+    "Connection",
+    "Freedom / Optionality",
+]
+
+WEIGHTS = {
+    "Security": 1.2,
+    "Energy": 1.3,
+    "Meaning / Fulfilment": 1.0,
+    "Connection": 1.2,
+    "Freedom / Optionality": 1.1,
+}
+
+# -----------------------
+# VERDICT LOGIC
+# -----------------------
+def weighted_score(scores):
+    num = sum(scores[p] * WEIGHTS[p] for p in scores)
+    den = sum(WEIGHTS.values())
+    return round(num / den, 2)
 
 def verdict(scores):
-    total = sum(scores.values())
-    any_minus_2 = any(v == -2 for v in scores.values())
+    avg = weighted_score(scores)
 
-    security = scores["Security"]
-    energy = scores["Energy"]
-    freedom = scores["Freedom / Optionality"]
-    connection = scores["Connection"]
+    # Hard guardrails
+    if scores["Energy"] <= 3 and scores["Security"] <= 5:
+        return "❌ NO — COST TOO HIGH", avg
+    if scores["Connection"] <= 3 and scores["Meaning / Fulfilment"] <= 5:
+        return "❌ NO — COST TOO HIGH", avg
 
-    if any_minus_2:
-        return "❌ NO — COST TOO HIGH"
-    if energy <= -1 and security <= 0:
-        return "❌ NO — COST TOO HIGH"
-    if total >= 3 or (security >= 1 and freedom >= 1):
-        return "✅ YES — ACT"
-    if energy <= -1 or connection <= -1:
-        return "⚠️ REDESIGN — SAME GOAL, DIFFERENT SHAPE"
-    return "⏸ WAIT — NOT RIPE"
+    if avg >= 7.2:
+        return "✅ YES — ACT", avg
+    if avg >= 6.0 or scores["Energy"] <= 5 or scores["Connection"] <= 5:
+        return "⚠️ REDESIGN — SAME GOAL, DIFFERENT SHAPE", avg
+    if avg >= 5.0:
+        return "⏸ WAIT — NOT RIPE", avg
+    return "❌ NO — COST TOO HIGH", avg
 
-def clamp_score(x):
-    try:
-        x = int(x)
-    except Exception:
-        return 0
-    return max(-2, min(2, x))
-
-def ai_analyse(decision, why_now, upside, downside, cost_action, cost_inaction, returns):
-    api_key = st.secrets.get("OPENAI_API_KEY", "")
-    if not api_key:
-        raise RuntimeError("Missing OPENAI_API_KEY in Streamlit Secrets.")
-    client = OpenAI(api_key=api_key)
+# -----------------------
+# AI ANALYSIS
+# -----------------------
+def ai_analyse(decision, goal, why_now, upside, downside, cost_action, cost_inaction, returns):
+    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
     system = (
-        "You are a strict decision analyst. "
-        "Your job: map the user's inputs to 5 pillar scores (-2..2) and a short reason. "
-        "No therapy. No motivational tone. No extra suggestions."
-        "Return ONLY valid JSON with keys: pillar_scores, reason."
+        "You are a strict decision analyst. No therapy, no motivation, no fluff. "
+        "Use ONLY the user's inputs. "
+        "Return ONLY valid JSON with keys: "
+        "pillar_scores, pillar_rationales, act_now_outcome, dont_act_outcome, goal_impact_summary. "
+        "pillar_scores must be integers 1..10 for EACH pillar. "
+        "pillar_rationales must be 1–2 short sentences per pillar explaining why that score was given. "
+        "act_now_outcome and dont_act_outcome must be max 2 sentences each. "
+        "If a goal is provided, prioritise scoring based on alignment to that goal."
     )
 
-    user = {
+    payload = {
         "decision": decision,
+        "goal": goal if goal else None,
         "why_now": why_now,
         "perceived_upside": upside,
         "perceived_downside": downside,
@@ -59,12 +76,7 @@ def ai_analyse(decision, why_now, upside, downside, cost_action, cost_inaction, 
         "cost_of_not_doing_it": cost_inaction,
         "potential_returns": returns,
         "pillars": PILLARS,
-        "score_scale": "-2..2 (integer)",
-        "rules": [
-            "Scores must be integers -2..2",
-            "Give a single 'reason' string, max ~2 sentences, impact-focused",
-            "If information is missing, infer cautiously and score nearer to 0",
-        ],
+        "score_scale": "1..10",
     }
 
     resp = client.chat.completions.create(
@@ -72,22 +84,27 @@ def ai_analyse(decision, why_now, upside, downside, cost_action, cost_inaction, 
         temperature=0.2,
         messages=[
             {"role": "system", "content": system},
-            {"role": "user", "content": json.dumps(user)},
+            {"role": "user", "content": json.dumps(payload)},
         ],
     )
 
-    text = resp.choices[0].message.content.strip()
-    data = json.loads(text)  # if this fails, we want it to fail loudly rather than guess
-    raw = data.get("pillar_scores", {})
+    data = json.loads(resp.choices[0].message.content.strip())
 
     scores = {}
-    for p in PILLARS:
-        scores[p] = clamp_score(raw.get(p, 0))
+    rationales = {}
 
-    reason = str(data.get("reason", "")).strip()[:280]
-    if not reason:
-        reason = "Reason unavailable (AI returned empty)."
-    return scores, reason
+    for p in PILLARS:
+        s = int(data["pillar_scores"].get(p, 5))
+        scores[p] = max(1, min(10, s))
+        rationales[p] = data["pillar_rationales"].get(p, "No rationale provided.")[:220]
+
+    return (
+        scores,
+        rationales,
+        data.get("act_now_outcome", "")[:300],
+        data.get("dont_act_outcome", "")[:300],
+        data.get("goal_impact_summary", "")[:240],
+    )
 
 # -----------------------
 # UI
@@ -95,71 +112,66 @@ def ai_analyse(decision, why_now, upside, downside, cost_action, cost_inaction, 
 st.title("Decision Engine 🧭")
 st.caption("One-shot analysis. One verdict. Then action.")
 
-decision = st.text_input("Decision (one sentence)", placeholder="e.g. Take on this client / Say no / Change routine")
-
-with st.expander("AI Intake (keep it short)"):
-    why_now = st.text_area("Why does this decision exist now?", max_chars=240)
-    upside = st.text_area("Main upside (what you believe you gain)", max_chars=240)
-    downside = st.text_area("Main downside (what you believe you risk/lose)", max_chars=240)
-    cost_action = st.text_area("Cost of doing it (time/money/energy)", max_chars=240)
-    cost_inaction = st.text_area("Cost of not doing it (6–12 months)", max_chars=240)
-    returns = st.text_area("Potential returns (what changes if it works)", max_chars=240)
+decision = st.text_input("Decision (one sentence)")
 
 st.divider()
+st.subheader("Goal alignment")
 
-col1, col2 = st.columns(2)
-with col1:
-    use_ai = st.toggle("Use AI to score pillars", value=True)
-with col2:
-    st.caption("Tip: AI mode is best for messy decisions. Manual mode is fastest.")
+has_goal = st.radio(
+    "Do you have a goal that will be impacted by this decision?",
+    ["No", "Yes"],
+    horizontal=True
+)
 
-scores = {p: 0 for p in PILLARS}
-ai_reason = ""
+goal = ""
+if has_goal == "Yes":
+    goal = st.text_input("State the goal (one sentence)")
 
-if use_ai:
-    if st.button("Analyse with AI"):
-        if not decision.strip():
-            st.error("Write the decision first.")
-        else:
-            try:
-                scores, ai_reason = ai_analyse(decision, why_now, upside, downside, cost_action, cost_inaction, returns)
-                st.session_state["scores"] = scores
-                st.session_state["ai_reason"] = ai_reason
-            except Exception as e:
-                st.error(f"AI analysis failed: {e}")
+with st.expander("AI intake (keep it short)"):
+    why_now = st.text_area("Why does this decision exist now?", max_chars=240)
+    upside = st.text_area("Main upside", max_chars=240)
+    downside = st.text_area("Main downside", max_chars=240)
+    cost_action = st.text_area("Cost of doing it", max_chars=240)
+    cost_inaction = st.text_area("Cost of not doing it", max_chars=240)
+    returns = st.text_area("Potential returns", max_chars=240)
 
-# Manual scoring fallback (always available)
-st.subheader("Pillar scores (–2 to +2)")
-scores = st.session_state.get("scores", scores)
-for p in PILLARS:
-    scores[p] = st.select_slider(p, options=SCORES, value=int(scores.get(p, 0)))
+if st.button("Analyse with AI"):
+    scores, rats, act_now, dont_act, goal_summary = ai_analyse(
+        decision, goal, why_now, upside, downside, cost_action, cost_inaction, returns
+    )
+    st.session_state.update({
+        "scores": scores,
+        "rats": rats,
+        "act_now": act_now,
+        "dont_act": dont_act,
+        "goal_summary": goal_summary,
+    })
 
-st.session_state["scores"] = scores
+scores = st.session_state.get("scores", {})
 
-result = ""
-if st.button("Get System Verdict"):
-    if not decision.strip():
-        st.error("Write the decision first.")
-    else:
-        result = verdict(scores)
-        st.session_state["verdict"] = result
+if scores:
+    st.subheader("Why these scores")
+    for p in PILLARS:
+        st.write(f"**{p}: {scores[p]}/10** — {st.session_state['rats'][p]}")
 
-if st.session_state.get("ai_reason"):
-    st.info(st.session_state["ai_reason"])
+    if goal:
+        st.subheader("Goal impact")
+        st.write(st.session_state["goal_summary"])
 
-if st.session_state.get("verdict"):
+    st.subheader("What changes")
+    st.write(f"**If you action this now:** {st.session_state['act_now']}")
+    st.write(f"**If you don’t action it now:** {st.session_state['dont_act']}")
+
+    result, avg = verdict(scores)
     st.divider()
-    st.subheader("SYSTEM VERDICT")
-    st.markdown(f"## {st.session_state['verdict']}")
-    st.caption("No overrides. Lock it and act.")
+    st.markdown(f"## {result}")
+    st.caption(f"Weighted score: {avg}/10")
 
-    st.subheader("Lock-in (required)")
+    st.subheader("Lock-in")
     inaction = st.text_area("If I do nothing, what gets worse in 6–12 months?", max_chars=240)
     action = st.text_input("Next physical action (within 48 hours)", max_chars=120)
 
-    if st.button("Lock Decision"):
-        if not inaction.strip() or not action.strip():
-            st.error("Both fields required to lock the decision.")
-        else:
+    if st.button("Lock decision"):
+        if inaction and action:
             st.success("Decision locked. Stop thinking. Start acting.")
-            st.caption(f"Logged on {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+            st.caption(datetime.now().strftime("%Y-%m-%d %H:%M"))
