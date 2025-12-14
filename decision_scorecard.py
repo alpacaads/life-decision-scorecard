@@ -1,91 +1,105 @@
-import json
-from datetime import datetime
-from pathlib import Path
 import streamlit as st
+from datetime import datetime
 
-DATA_FILE = Path("decisions.json")
+st.set_page_config(page_title="Decision Engine", page_icon="🧭")
 
+# -----------------------
+# CONFIG
+# -----------------------
 PILLARS = [
-    "Family (wife & son)",
-    "Business (stability & growth)",
-    "Physical health",
-    "Mental health / peace",
+    "Security",
+    "Energy",
+    "Meaning / Fulfilment",
+    "Connection",
+    "Freedom / Optionality",
 ]
 
 SCORES = [-2, -1, 0, 1, 2]
 
-def load_decisions():
-    if DATA_FILE.exists():
-        try:
-            return json.loads(DATA_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            return []
-    return []
+# -----------------------
+# VERDICT LOGIC
+# -----------------------
+def verdict(scores):
+    total = sum(scores.values())
+    any_minus_2 = any(v == -2 for v in scores.values())
 
-def save_decisions(decisions):
-    DATA_FILE.write_text(json.dumps(decisions, indent=2), encoding="utf-8")
-
-def compute_verdict(scores_dict, inaction_cost, fragility):
-    any_minus_2 = any(v == -2 for v in scores_dict.values())
-    total = sum(scores_dict.values())
-
-    high_inaction = len(inaction_cost.strip()) >= 20
-    reduces_fragility = fragility == "Reduces fragility (more buffer)"
+    security = scores["Security"]
+    energy = scores["Energy"]
+    freedom = scores["Freedom / Optionality"]
+    connection = scores["Connection"]
 
     if any_minus_2:
-        return "NO (or redesign)", total
-    if total > 0:
-        return "YES", total
-    if total == 0 and (high_inaction or reduces_fragility):
-        return "YES", total
-    if reduces_fragility:
-        return "YES", total
-    return "REDESIGN / WAIT", total
+        return "❌ NO — COST TOO HIGH"
 
-st.set_page_config(page_title="Life Decision Scorecard", page_icon="✅")
+    if energy <= -1 and security <= 0:
+        return "❌ NO — COST TOO HIGH"
 
-st.title("Life Decision Scorecard")
-st.caption("Impact-based decisions across your core life pillars.")
+    if total >= 3 or (security >= 1 and freedom >= 1):
+        return "✅ YES — ACT"
 
-decisions = load_decisions()
+    if energy <= -1 or connection <= -1:
+        return "⚠️ REDESIGN — SAME GOAL, DIFFERENT SHAPE"
 
-with st.form("scorecard"):
-    decision = st.text_input("Decision (one sentence)")
-    date = st.date_input("Date", value=datetime.now().date())
+    return "⏸ WAIT — NOT RIPE"
 
-    st.subheader("Pillar impact (–2 to +2)")
-    scores = {}
-    for pillar in PILLARS:
-        scores[pillar] = st.select_slider(pillar, options=SCORES, value=0)
+# -----------------------
+# UI
+# -----------------------
+st.title("Decision Engine 🧭")
+st.caption("The system decides. You provide honest inputs.")
 
-    st.subheader("Inaction cost (6–12 months)")
-    inaction_cost = st.text_area("If I do nothing, what’s the cost?")
+decision = st.text_input(
+    "Decision (one sentence only)",
+    placeholder="e.g. Take on this client / Change my routine / Say no"
+)
 
-    st.subheader("Fragility test")
-    fragility = st.radio(
-        "Does this increase or reduce fragility?",
-        ["Reduces fragility (more buffer)", "Neutral", "Increases fragility"],
+st.divider()
+st.subheader("Score the impact over 6–12 months")
+
+scores = {}
+for pillar in PILLARS:
+    scores[pillar] = st.select_slider(
+        pillar,
+        options=SCORES,
+        value=0,
+        help="First instinct only. Do not justify."
     )
 
-    next_action = st.text_input("Next smallest action (24–48 hrs)")
-    submitted = st.form_submit_button("Compute + Save")
+ready = st.button("Get Decision")
 
-if submitted and decision.strip():
-    verdict, total = compute_verdict(scores, inaction_cost, fragility)
+# -----------------------
+# RESULT
+# -----------------------
+if ready:
+    if not decision.strip():
+        st.error("Write the decision first.")
+    else:
+        result = verdict(scores)
 
-    entry = {
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "date": str(date),
-        "decision": decision,
-        "scores": scores,
-        "total_score": total,
-        "inaction_cost": inaction_cost,
-        "fragility": fragility,
-        "next_action": next_action,
-        "verdict": verdict,
-    }
+        st.divider()
+        st.subheader("SYSTEM VERDICT")
+        st.markdown(f"## {result}")
 
-    decisions.insert(0, entry)
-    save_decisions(decisions)
+        st.caption("This verdict cannot be overridden.")
 
-    st.success(f"Verdict: {verdict} | Total score: {total}")
+        st.divider()
+        st.subheader("Lock-in (required)")
+
+        inaction = st.text_area(
+            "If I do nothing, what gets worse in 6–12 months?",
+            max_chars=240,
+            placeholder="Be blunt. No stories."
+        )
+
+        action = st.text_input(
+            "Next physical action (within 48 hours)",
+            max_chars=120,
+            placeholder="One concrete step only"
+        )
+
+        if st.button("Lock Decision"):
+            if not inaction.strip() or not action.strip():
+                st.error("Both fields required to lock the decision.")
+            else:
+                st.success("Decision locked. Stop thinking. Start acting.")
+                st.caption(f"Logged on {datetime.now().strftime('%Y-%m-%d %H:%M')}")
