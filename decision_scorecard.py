@@ -49,35 +49,83 @@ def verdict_box(m: dict):
     dont = (m.get("dont", "") or "").strip()
     blocker = (m.get("blocker", "") or "").strip()
 
-    def li(label, text):
-        if not text:
-            return ""
-        return f"""
-        <li style="margin: 12px 0;">
-          <span style="opacity:0.65; font-size:0.82rem; letter-spacing:0.08em;">{label}</span><br/>
-          <span style="font-size:1.05rem; line-height:1.55;">{text}</span>
-        </li>
+    # Conversational reflection. Keep it feeling like a conscience, not a report.
+    parts = []
+    if want:
+        parts.append(want)
+    if act:
+        parts.append(act)
+    if dont:
+        parts.append(dont)
+
+    reflection = " ".join(parts).strip()
+
+    # Emphasise blocker without shouting.
+    blocker_html = ""
+    if blocker:
+        blocker_html = f"""
+        <div style="
+            margin-top: 18px;
+            display: inline-block;
+            padding: 10px 14px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.10);
+            font-weight: 650;
+            line-height: 1.65;
+        ">
+            {blocker}
+        </div>
         """
 
     st.markdown(
         f"""
-        <div style="
+        <style>
+            @keyframes lockinFadeUp {{
+                from {{
+                    opacity: 0;
+                    transform: translateY(10px);
+                }}
+                to {{
+                    opacity: 1;
+                    transform: translateY(0);
+                }}
+            }}
+            .lockin-verdict {{
+                animation: lockinFadeUp 320ms ease-out;
+            }}
+        </style>
+
+        <div class="lockin-verdict" style="
             border: 1px solid rgba(255,255,255,0.12);
-            border-radius: 14px;
-            padding: 28px 32px;
-            background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
-            box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+            border-radius: 18px;
+            padding: 36px 40px;
+            background: linear-gradient(
+                180deg,
+                rgba(255,255,255,0.05),
+                rgba(255,255,255,0.015)
+            );
+            box-shadow: 0 14px 40px rgba(0,0,0,0.4);
+            text-align: center;
         ">
-            <div style="display:block; font-size:0.85rem; opacity:0.6; letter-spacing:0.08em; margin-bottom:14px;">
+            <div style="
+                font-size:0.75rem;
+                opacity:0.55;
+                letter-spacing:0.14em;
+                margin-bottom:20px;
+            ">
                 VERDICT
             </div>
 
-            <ul style="list-style:none; padding-left:0; margin:0;">
-                {li("WHAT YOU WANT", want)}
-                {li("IF YOU ACT", act)}
-                {li("IF YOU DON’T", dont)}
-                {li("WHAT’S REALLY STOPPING YOU", blocker)}
-            </ul>
+            <div style="
+                font-size:1.15rem;
+                line-height:1.75;
+                max-width: 680px;
+                margin: 0 auto;
+            ">
+                {reflection}
+                {blocker_html}
+            </div>
         </div>
         """,
         unsafe_allow_html=True
@@ -178,14 +226,6 @@ def ai_one_thing(answers: dict, mirror_obj: dict, correction: str | None = None)
             "Must reduce the main blocker immediately.",
             "Prefer actions that create a real artifact: sent message, drafted email, booked meeting, written doc, created proposal, etc."
         ],
-        "output_style": {
-            "headline_examples": [
-                "Good news: this is a 10-minute move.",
-                "Good news: you can settle this fast."
-            ],
-            "start_style": "one sentence, direct",
-            "why_this_style": "one sentence, specific"
-        }
     }
 
     resp = get_client().chat.completions.create(
@@ -244,9 +284,7 @@ with topR:
 
 st.divider()
 
-# -----------------------
 # Step 1: Decision
-# -----------------------
 if st.session_state.step == 0:
     st.subheader("What decision are You making?")
     val = st.text_input(
@@ -263,9 +301,7 @@ if st.session_state.step == 0:
         else:
             go(1)
 
-# -----------------------
 # Step 2: Why it matters
-# -----------------------
 elif st.session_state.step == 1:
     st.subheader("Tell me why this decision matters to You.")
     val = st.text_area(
@@ -288,9 +324,7 @@ elif st.session_state.step == 1:
             else:
                 go(2)
 
-# -----------------------
 # Step 3: Why not yet
-# -----------------------
 elif st.session_state.step == 2:
     st.subheader("Why haven’t You done it yet?")
     val = st.text_area(
@@ -313,9 +347,7 @@ elif st.session_state.step == 2:
             else:
                 go(3)
 
-# -----------------------
 # Step 4: If you don’t
-# -----------------------
 elif st.session_state.step == 3:
     st.subheader("What happens if You don’t do it?")
     val = st.text_area(
@@ -338,9 +370,7 @@ elif st.session_state.step == 3:
             else:
                 go(4)
 
-# -----------------------
 # Step 5: If you do now
-# -----------------------
 elif st.session_state.step == 4:
     st.subheader("And if You do it now, what happens?")
     val = st.text_area(
@@ -363,9 +393,7 @@ elif st.session_state.step == 4:
             else:
                 go(5)
 
-# -----------------------
 # Step 6: Values top 3 (separate fields)
-# -----------------------
 elif st.session_state.step == 5:
     st.subheader("To help me make this decision, I need a little bit of information about You.")
     st.write("What are the **3 things** You value the most right now?")
@@ -394,9 +422,6 @@ elif st.session_state.step == 5:
     )
     setv("value_3", v3)
 
-    combined = ", ".join([x for x in [v1, v2, v3] if x.strip()])
-    setv("values_top3", combined)
-
     c1, c2 = st.columns([1, 1])
     with c1:
         if st.button("⬅ Back"):
@@ -421,9 +446,7 @@ elif st.session_state.step == 5:
 
                 go(6)
 
-# -----------------------
-# Step 7: Verdict (no extra headline) + Confirm / Adjust
-# -----------------------
+# Step 7: Verdict + confirm/adjust (new button text)
 elif st.session_state.step == 6:
     if st.session_state.mirror is None:
         with st.spinner("Thinking…"):
@@ -439,7 +462,7 @@ elif st.session_state.step == 6:
             st.session_state.mirror = None
             go(5)
     with c2:
-        if st.button("Confirm ✅"):
+        if st.button("Yes, you got that right"):
             # reset Step 8 state
             st.session_state.action_one = None
             st.session_state.action_correction = ""
@@ -450,7 +473,7 @@ elif st.session_state.step == 6:
             st.session_state.did_it = None
             go(7)
     with c3:
-        if st.button("Adjust ✍️"):
+        if st.button("No, not exactly"):
             st.session_state._show_correction = True
             st.rerun()
 
@@ -481,13 +504,10 @@ elif st.session_state.step == 6:
                     st.session_state._show_correction = False
                     st.rerun()
 
-# -----------------------
 # Step 8: Next step (Agree/Adjust) -> Lock in now / Maybe later -> Timer
-# -----------------------
 elif st.session_state.step == 7:
     st.subheader("Next best step")
 
-    # Get AI suggestion once
     if st.session_state.action_one is None:
         with st.spinner("Choosing the next best step…"):
             st.session_state.action_one = ai_one_thing(
@@ -565,8 +585,6 @@ elif st.session_state.step == 7:
     elif not st.session_state.lockin_started:
         st.markdown("### Ready?")
         st.markdown(f"**Time box:** {minutes} minutes")
-
-        # show the action again (so it’s visible here)
         st.markdown(f"**Action:** {action}")
 
         c1, c2, c3 = st.columns([1, 1, 2])
@@ -614,12 +632,10 @@ elif st.session_state.step == 7:
                 st.session_state.did_it = False
                 go(8)
 
-# -----------------------
 # Step 9: Outcome
-# -----------------------
 elif st.session_state.step == 8:
     if st.session_state.did_it is True:
-        st.success("Good. You improved Your life by acting. That’s how You get closer to what You said matters.")
+        st.success("Good. You acted. That’s how You get closer to what You said matters.")
         st.caption("If You want momentum: do the next smallest step immediately.")
     else:
         st.info("That’s fine. It simply means this doesn’t matter to You right now. Revisit it when it becomes urgent.")
