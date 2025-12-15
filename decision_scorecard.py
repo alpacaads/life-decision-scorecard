@@ -44,74 +44,53 @@ def reset_all():
     st.session_state.did_it = None
 
 def verdict_box(m: dict):
-    import html
+    want = (m.get("want", "") or "").strip()
+    act = (m.get("act", "") or "").strip()
+    dont = (m.get("dont", "") or "").strip()
+    blocker = (m.get("blocker", "") or "").strip()
 
-    def clean(s: str) -> str:
-        # Escape anything that could be treated like HTML
-        return html.escape((s or "").strip())
-
-    want = clean(m.get("want", ""))
-    act = clean(m.get("act", ""))
-    dont = clean(m.get("dont", ""))
-    blocker = clean(m.get("blocker", ""))
-
-    reflection = " ".join([x for x in [want, act, dont] if x]).strip()
-
-    blocker_html = ""
-    if blocker:
-        blocker_html = f"""
-        <div style="
-            margin-top: 18px;
-            display: inline-block;
-            padding: 10px 14px;
-            border-radius: 12px;
-            background: rgba(255,255,255,0.04);
-            border: 1px solid rgba(255,255,255,0.10);
-            font-weight: 650;
-            line-height: 1.65;
-        ">
-            {blocker}
-        </div>
+    def li(label, text):
+        if not text:
+            return ""
+        return f"""
+        <li style="margin: 14px 0;">
+            <div style="opacity:0.65; font-size:0.78rem; letter-spacing:0.08em; margin-bottom:4px;">
+                {label}
+            </div>
+            <div style="font-size:1.05rem; line-height:1.55;">
+                {text}
+            </div>
+        </li>
         """
 
     st.markdown(
         f"""
-        <style>
-            @keyframes lockinFadeUp {{
-                from {{ opacity: 0; transform: translateY(10px); }}
-                to   {{ opacity: 1; transform: translateY(0); }}
-            }}
-            .lockin-verdict {{
-                animation: lockinFadeUp 320ms ease-out;
-            }}
-        </style>
-
-        <div class="lockin-verdict" style="
+        <div style="
             border: 1px solid rgba(255,255,255,0.12);
-            border-radius: 18px;
-            padding: 36px 40px;
-            background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015));
-            box-shadow: 0 14px 40px rgba(0,0,0,0.4);
-            text-align: center;
+            border-radius: 16px;
+            padding: 30px 34px;
+            background: linear-gradient(
+                180deg,
+                rgba(255,255,255,0.04),
+                rgba(255,255,255,0.01)
+            );
+            box-shadow: 0 12px 34px rgba(0,0,0,0.38);
         ">
             <div style="
-                font-size:0.75rem;
-                opacity:0.55;
-                letter-spacing:0.14em;
-                margin-bottom:20px;
+                font-size:0.8rem;
+                opacity:0.6;
+                letter-spacing:0.12em;
+                margin-bottom:18px;
             ">
                 VERDICT
             </div>
 
-            <div style="
-                font-size:1.15rem;
-                line-height:1.75;
-                max-width: 680px;
-                margin: 0 auto;
-            ">
-                {reflection}
-                {blocker_html}
-            </div>
+            <ul style="list-style:none; padding-left:0; margin:0;">
+                {li("WHAT YOU WANT", want)}
+                {li("IF YOU ACT", act)}
+                {li("IF YOU DON’T", dont)}
+                {li("WHAT’S REALLY STOPPING YOU", blocker)}
+            </ul>
         </div>
         """,
         unsafe_allow_html=True
