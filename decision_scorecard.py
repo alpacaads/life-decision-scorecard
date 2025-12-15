@@ -39,7 +39,7 @@ def reset_all():
     st.session_state.analysis_correction = ""
     st.session_state.show_analysis_correction = False
 
-    st.session_state.decision_action = None
+    st.session_state.next_action = None
     st.session_state.action_correction = ""
     st.session_state.show_action_correction = False
 
@@ -63,13 +63,12 @@ def ai_risk_reward(answers, correction=None):
     system = (
         "You are a calm, rational decision analyst.\n"
         "Speak directly to 'You'. Never say 'user'.\n"
-        "Plain text only. No HTML, markdown, or symbols.\n"
-        "Return JSON ONLY with keys:\n"
-        "risk_reward\n"
-        "The value must be a single, thoughtful paragraph explaining:\n"
+        "Plain text only. No HTML/markdown/symbols.\n"
+        "Return JSON ONLY with key: risk_reward\n"
+        "risk_reward must be a single paragraph explaining:\n"
         "- the upside if You act\n"
         "- the downside if You don't\n"
-        "- the real tradeoff involved\n"
+        "- the real tradeoff\n"
         "Do not give advice yet.\n"
     )
 
@@ -94,24 +93,34 @@ def ai_risk_reward(answers, correction=None):
     return json.loads(r.choices[0].message.content)
 
 
-def ai_one_action(answers, analysis, correction=None):
+def ai_smallest_next_step(answers, risk_reward_text, correction=None):
     system = (
-        "You are an execution-focused decision guide.\n"
-        "Speak directly to 'You'.\n"
-        "Plain text only.\n"
+        "You are an execution coach.\n"
+        "Speak directly to 'You'. Never say 'user'.\n"
+        "Plain text only. No markdown, no HTML.\n"
+        "You MUST output a physically actionable next step — not a restatement of the decision.\n\n"
+        "Before deciding the action, think:\n"
+        "1) What does 'done' look like for this decision?\n"
+        "2) What is the smallest possible step that meaningfully moves You toward done?\n"
+        "3) What is the simplest way to do it in the real world right now?\n\n"
         "Return JSON ONLY with keys:\n"
-        "action, minutes\n"
+        "action, how, minutes\n\n"
         "Rules:\n"
-        "- action must be ONE clear decision or action\n"
-        "- no steps, no lists, no explanations\n"
-        "- minutes must be one of: 10, 15, 20, 30, 45, 60\n"
-        "- choose the smallest honest time needed\n"
+        "- action: ONE specific action, starting with a verb (e.g., 'Open Gmail and draft…').\n"
+        "- how: ONE sentence that makes it easy to execute.\n"
+        "- minutes: one of 10, 15, 20, 30, 45, 60 (pick smallest honest).\n"
+        "- Do NOT say 'decide to…', 'consider…', 'think about…', 'raise the fee…'.\n"
+        "- The action must be something You can do immediately.\n"
     )
 
     payload = {
         "decision": answers["decision"],
-        "analysis": analysis,
+        "why_matters": answers["why_matters"],
+        "why_not_yet": answers["why_not_yet"],
+        "if_dont": answers["if_dont"],
+        "if_do": answers["if_do"],
         "values": [answers["value_1"], answers["value_2"], answers["value_3"]],
+        "risk_reward": risk_reward_text,
         "correction": correction,
     }
 
@@ -189,7 +198,7 @@ elif st.session_state.step == 5:
             st.error("Fill all three.")
         else:
             st.session_state.analysis = None
-            st.session_state.decision_action = None
+            st.session_state.next_action = None
             go(6)
 
 # ---------------------
@@ -232,31 +241,35 @@ elif st.session_state.step == 6:
             go(7)
 
 # ---------------------
-# STEP 8 — One action
+# STEP 8 — Smallest next step (action + how)
 # ---------------------
 elif st.session_state.step == 7:
-    if not st.session_state.decision_action:
-        with st.spinner("Finding the one move that matters…"):
-            st.session_state.decision_action = ai_one_action(
+    if not st.session_state.next_action:
+        with st.spinner("Finding the smallest next step…"):
+            st.session_state.next_action = ai_smallest_next_step(
                 st.session_state.answers,
                 st.session_state.analysis["risk_reward"],
             )
 
-    action = st.session_state.decision_action
-    minutes = int(action["minutes"])
+    na = st.session_state.next_action
+    minutes = int(na.get("minutes", 10) or 10)
 
     st.subheader("The one thing to do now")
-    st.markdown(f"### {safe_text(action['action'])}")
-    st.caption(f"This takes about {minutes} minutes once You lock in.")
+    st.markdown(f"### {safe_text(na.get('action', ''))}")
+    st.caption(safe_text(na.get("how", "")))
+    st.caption(f"Time needed: about {minutes} minutes once You lock in.")
 
     st.divider()
-    c1, c2 = st.columns([1, 1])
+    c1, c2, c3 = st.columns([1, 1, 1])
     with c1:
+        if st.button("⬅ Back"):
+            go(6)
+    with c2:
         if st.button("Lock in 🔒"):
             st.session_state.locked_in = True
             st.session_state.timer_start = time.time()
             go(8)
-    with c2:
+    with c3:
         if st.button("Not right now"):
             st.session_state.did_it = False
             go(8)
@@ -265,8 +278,12 @@ elif st.session_state.step == 7:
 # STEP 9 — Timer & outcome
 # ---------------------
 elif st.session_state.step == 8:
-    action = st.session_state.decision_action
-    minutes = int(action["minutes"])
+    na = st.session_state.get("next_action")
+    if not na:
+        st.error("Action data is missing. Go back one step and continue.")
+        st.stop()
+
+    minutes = int(na.get("minutes", 10) or 10)
 
     if st.session_state.timer_start:
         elapsed = int(time.time() - st.session_state.timer_start)
@@ -288,5 +305,6 @@ elif st.session_state.step == 8:
     elif st.session_state.did_it is False:
         st.info("That’s fine. It simply means this doesn’t matter to You right now.")
 
+    st.divider()
     if st.button("Run another decision"):
         reset_all()
