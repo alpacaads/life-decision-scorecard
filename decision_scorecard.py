@@ -291,7 +291,8 @@ elif st.session_state.step == 7:
 elif st.session_state.step == 8:
     if st.session_state.timer_start:
         elapsed = int(time.time() - st.session_state.timer_start)
-        remaining = max(0, a["minutes"] * 60 - elapsed)
+        action = st.session_state.action
+remaining = max(0, action["minutes"] * 60 - elapsed)
         st_autorefresh(interval=1000, key="tick")
         st.markdown(f"⏳ **{remaining//60:02d}:{remaining%60:02d} remaining**")
 
