@@ -133,7 +133,30 @@ def ai_one_thing(answers: dict, mirror_obj: dict) -> dict:
         ],
     )
     return safe_json_loads(resp.choices[0].message.content)
-
+def verdict_box(text: str):
+    st.markdown(
+        f"""
+        <div style="
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 14px;
+            padding: 28px 32px;
+            background: linear-gradient(
+                180deg,
+                rgba(255,255,255,0.04),
+                rgba(255,255,255,0.01)
+            );
+            box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+            font-size: 1.15rem;
+            line-height: 1.6;
+        ">
+            <strong style="display:block; font-size:0.85rem; opacity:0.6; letter-spacing:0.08em; margin-bottom:10px;">
+                VERDICT
+            </strong>
+            {text}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 # -----------------------
 # State init
 # -----------------------
@@ -354,7 +377,7 @@ elif st.session_state.step == 6:
 
     if mirror_text:
         # Single callout box (feels like a verdict)
-        st.info(mirror_text)
+        verdict_box(mirror_text)
 
     st.divider()
     c1, c2, c3 = st.columns([1, 1, 2])
