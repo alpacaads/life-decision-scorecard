@@ -44,23 +44,19 @@ def reset_all():
     st.session_state.did_it = None
 
 def verdict_box(m: dict):
-    want = (m.get("want", "") or "").strip()
-    act = (m.get("act", "") or "").strip()
-    dont = (m.get("dont", "") or "").strip()
-    blocker = (m.get("blocker", "") or "").strip()
+    import html
 
-    # Conversational reflection. Keep it feeling like a conscience, not a report.
-    parts = []
-    if want:
-        parts.append(want)
-    if act:
-        parts.append(act)
-    if dont:
-        parts.append(dont)
+    def clean(s: str) -> str:
+        # Escape anything that could be treated like HTML
+        return html.escape((s or "").strip())
 
-    reflection = " ".join(parts).strip()
+    want = clean(m.get("want", ""))
+    act = clean(m.get("act", ""))
+    dont = clean(m.get("dont", ""))
+    blocker = clean(m.get("blocker", ""))
 
-    # Emphasise blocker without shouting.
+    reflection = " ".join([x for x in [want, act, dont] if x]).strip()
+
     blocker_html = ""
     if blocker:
         blocker_html = f"""
@@ -82,14 +78,8 @@ def verdict_box(m: dict):
         f"""
         <style>
             @keyframes lockinFadeUp {{
-                from {{
-                    opacity: 0;
-                    transform: translateY(10px);
-                }}
-                to {{
-                    opacity: 1;
-                    transform: translateY(0);
-                }}
+                from {{ opacity: 0; transform: translateY(10px); }}
+                to   {{ opacity: 1; transform: translateY(0); }}
             }}
             .lockin-verdict {{
                 animation: lockinFadeUp 320ms ease-out;
@@ -100,11 +90,7 @@ def verdict_box(m: dict):
             border: 1px solid rgba(255,255,255,0.12);
             border-radius: 18px;
             padding: 36px 40px;
-            background: linear-gradient(
-                180deg,
-                rgba(255,255,255,0.05),
-                rgba(255,255,255,0.015)
-            );
+            background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015));
             box-shadow: 0 14px 40px rgba(0,0,0,0.4);
             text-align: center;
         ">
@@ -130,7 +116,6 @@ def verdict_box(m: dict):
         """,
         unsafe_allow_html=True
     )
-
 # -----------------------
 # AI
 # -----------------------
