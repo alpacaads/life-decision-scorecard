@@ -2,6 +2,7 @@ import json
 import time
 import streamlit as st
 from openai import OpenAI
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Lock In", page_icon="🧭", layout="centered")
 
@@ -28,11 +29,11 @@ def reset_all():
     st.session_state.step = 0
     st.session_state.answers = {}
     st.session_state.mirror = None
-    st.session_state.mirror_approved = False
     st.session_state.correction = ""
     st.session_state.action_one = None
     st.session_state.timer_started_at = None
     st.session_state.did_it = None
+    st.session_state._show_correction = False
 
 # -----------------------
 # AI
@@ -41,16 +42,19 @@ def ai_mirror(answers: dict, correction: str | None = None) -> dict:
     """
     Returns JSON:
     {
-      "mirror": "short blunt mirror (max 5 lines)",
-      "because": "one line: why You care",
-      "blocker": "one line: why You haven't acted"
+      "mirror": "2–3 sentences max, blunt, thoughtful",
+      "because": "",
+      "blocker": ""
     }
     """
     system = (
-        "You are a blunt, practical mirror. No therapy. No motivational tone. No fluff. "
+        "You are a blunt, high-precision decision mirror. No fluff. No therapy. "
         "Never say the word 'user'. Speak directly to 'You'. "
         "Return ONLY valid JSON with keys: mirror, because, blocker. "
-        "mirror must be max 5 short lines. No bullet points."
+        "IMPORTANT: mirror must be 2–3 sentences MAX. No bullet points. "
+        "mirror must explicitly reference the top values and the impact on them. "
+        "mirror must include ONE sharp insight about why You haven’t acted, tied to the values/outcomes. "
+        "Avoid generic phrasing like 'this matters because' unless it adds new information."
     )
 
     payload = {
@@ -59,15 +63,17 @@ def ai_mirror(answers: dict, correction: str | None = None) -> dict:
         "why_not_yet": answers.get("why_not_yet", ""),
         "if_dont": answers.get("if_dont", ""),
         "if_do": answers.get("if_do", ""),
-        "values_top3": answers.get("values_top3", ""),
+        "values_top3_ranked": [
+            answers.get("value_1", ""),
+            answers.get("value_2", ""),
+            answers.get("value_3", ""),
+        ],
+        "values_top3_combined": answers.get("values_top3", ""),
         "correction_if_any": correction or None,
-        "format_instruction": (
-            "Write the mirror in this exact structure:\n"
-            "1) You want ___\n"
-            "2) This matters because ___\n"
-            "3) If You don’t act: ___\n"
-            "4) If You act now: ___\n"
-            "5) You haven’t acted because ___"
+        "output_style": (
+            "Write it like this, but keep it 2–3 sentences:\n"
+            "So what I’m getting is: if You do this, the impact on [top values] is ___. "
+            "You haven’t done it because ___. The real issue is ___."
         ),
     }
 
@@ -94,23 +100,27 @@ def ai_one_thing(answers: dict, mirror_obj: dict) -> dict:
         "Never say the word 'user'. Speak directly to 'You'. "
         "Return ONLY valid JSON with keys: one_thing, start. "
         "one_thing must be ONE concrete action You can start immediately and make progress on in 10 minutes. "
-        "Do NOT give multiple steps. Do NOT give options. Do NOT give a plan."
+        "Do NOT give multiple steps. Do NOT give options. Do NOT give a plan. "
+        "Make it specific and startable right now."
     )
 
     payload = {
         "decision": answers.get("decision", ""),
         "mirror": mirror_obj.get("mirror", ""),
-        "because": mirror_obj.get("because", ""),
-        "blocker": mirror_obj.get("blocker", ""),
         "why_matters": answers.get("why_matters", ""),
         "why_not_yet": answers.get("why_not_yet", ""),
         "if_dont": answers.get("if_dont", ""),
         "if_do": answers.get("if_do", ""),
-        "values_top3": answers.get("values_top3", ""),
+        "values_top3_ranked": [
+            answers.get("value_1", ""),
+            answers.get("value_2", ""),
+            answers.get("value_3", ""),
+        ],
         "hard_constraints": [
             "Must be doable with a laptop/phone right now.",
             "Must be specific (send X, write Y, book Z, open A and do B).",
             "Must not require waiting on other people to begin.",
+            "Should reduce the main blocker immediately (even if it’s only the first 10%).",
         ],
     }
 
@@ -133,8 +143,6 @@ if "answers" not in st.session_state:
     st.session_state.answers = {}
 if "mirror" not in st.session_state:
     st.session_state.mirror = None
-if "mirror_approved" not in st.session_state:
-    st.session_state.mirror_approved = False
 if "correction" not in st.session_state:
     st.session_state.correction = ""
 if "action_one" not in st.session_state:
@@ -143,6 +151,8 @@ if "timer_started_at" not in st.session_state:
     st.session_state.timer_started_at = None
 if "did_it" not in st.session_state:
     st.session_state.did_it = None
+if "_show_correction" not in st.session_state:
+    st.session_state._show_correction = False
 
 # -----------------------
 # UI
@@ -279,20 +289,38 @@ elif st.session_state.step == 4:
                 go(5)
 
 # -----------------------
-# Step 6: Values top 3
+# Step 6: Values top 3 (separate fields)
 # -----------------------
 elif st.session_state.step == 5:
     st.subheader("To help me make this decision, I need a little bit of information about You.")
     st.write("What are the **3 things** You value the most right now?")
 
-    val = st.text_area(
-        "",
-        value=need("values_top3"),
-        placeholder="e.g. Family, business stability, peace of mind",
-        max_chars=220,
-        height=110,
+    v1 = st.text_input(
+        "Most important",
+        value=need("value_1"),
+        placeholder="e.g. Spending time with my family",
+        max_chars=80,
     )
-    setv("values_top3", val)
+    setv("value_1", v1)
+
+    v2 = st.text_input(
+        "Second most important",
+        value=need("value_2"),
+        placeholder="e.g. Stable income",
+        max_chars=80,
+    )
+    setv("value_2", v2)
+
+    v3 = st.text_input(
+        "Third most important",
+        value=need("value_3"),
+        placeholder="e.g. Peace of mind",
+        max_chars=80,
+    )
+    setv("value_3", v3)
+
+    combined = ", ".join([x for x in [v1, v2, v3] if x.strip()])
+    setv("values_top3", combined)
 
     c1, c2 = st.columns([1, 1])
     with c1:
@@ -300,19 +328,19 @@ elif st.session_state.step == 5:
             go(4)
     with c2:
         if st.button("Next ➜"):
-            if not need("values_top3"):
-                st.error("List 3 things (comma-separated is fine).")
+            if not (v1.strip() and v2.strip() and v3.strip()):
+                st.error("Please fill in all three values.")
             else:
-                # clear downstream caches if they exist
                 st.session_state.mirror = None
-                st.session_state.mirror_approved = False
                 st.session_state.action_one = None
                 st.session_state.timer_started_at = None
                 st.session_state.did_it = None
+                st.session_state.correction = ""
+                st.session_state._show_correction = False
                 go(6)
 
 # -----------------------
-# Step 7: AI Mirror + Confirm / Adjust
+# Step 7: AI Mirror in a single callout box + Confirm / Adjust
 # -----------------------
 elif st.session_state.step == 6:
     st.subheader("So what You’re saying is:")
@@ -322,12 +350,11 @@ elif st.session_state.step == 6:
             st.session_state.mirror = ai_mirror(st.session_state.answers)
 
     m = st.session_state.mirror or {}
+    mirror_text = (m.get("mirror", "") or "").strip()
 
-    if m:
-        st.markdown(m.get("mirror", "").strip())
-        st.divider()
-        st.caption(f"**This matters because:** {m.get('because','').strip()}")
-        st.caption(f"**You haven’t acted because:** {m.get('blocker','').strip()}")
+    if mirror_text:
+        # Single callout box (feels like a verdict)
+        st.info(mirror_text)
 
     st.divider()
     c1, c2, c3 = st.columns([1, 1, 2])
@@ -337,14 +364,13 @@ elif st.session_state.step == 6:
             go(5)
     with c2:
         if st.button("Confirm ✅"):
-            st.session_state.mirror_approved = True
             go(7)
     with c3:
         if st.button("Adjust ✍️"):
             st.session_state._show_correction = True
             st.rerun()
 
-    if st.session_state.get("_show_correction"):
+    if st.session_state._show_correction:
         corr = st.text_area(
             "What did I get wrong? (one blunt correction)",
             value=st.session_state.correction,
@@ -364,7 +390,10 @@ elif st.session_state.step == 6:
                     st.error("Write a correction first.")
                 else:
                     with st.spinner("Rewriting…"):
-                        st.session_state.mirror = ai_mirror(st.session_state.answers, correction=st.session_state.correction)
+                        st.session_state.mirror = ai_mirror(
+                            st.session_state.answers,
+                            correction=st.session_state.correction
+                        )
                     st.session_state._show_correction = False
                     st.rerun()
 
@@ -379,12 +408,14 @@ elif st.session_state.step == 7:
             st.session_state.action_one = ai_one_thing(st.session_state.answers, st.session_state.mirror or {})
 
     a1 = st.session_state.action_one or {}
-    if a1:
-        st.markdown(f"## {a1.get('one_thing','').strip()}")
-        if a1.get("start"):
-            st.caption(a1.get("start","").strip())
+    one_thing = (a1.get("one_thing", "") or "").strip()
+    start_line = (a1.get("start", "") or "").strip()
 
-    # Start timer when this step first loads
+    if one_thing:
+        st.markdown(f"## {one_thing}")
+    if start_line:
+        st.caption(start_line)
+
     if st.session_state.timer_started_at is None:
         st.session_state.timer_started_at = time.time()
 
@@ -398,13 +429,12 @@ elif st.session_state.step == 7:
     st.divider()
     st.markdown(f"### ⏳ {mins:02d}:{secs:02d} remaining")
 
-    # Live countdown
-    st.autorefresh(interval=1000, key="timer_tick")
+    # Live countdown refresh
+    st_autorefresh(interval=1000, key="timer_tick")
 
     c1, c2, c3 = st.columns([1, 1, 2])
     with c1:
         if st.button("⬅ Back"):
-            # Going back cancels timer + action so You can reconfirm mirror
             st.session_state.action_one = None
             st.session_state.timer_started_at = None
             go(6)
