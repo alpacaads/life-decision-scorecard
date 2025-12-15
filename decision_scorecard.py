@@ -34,16 +34,16 @@ def go(step: int):
 def reset_all():
     st.session_state.step = 0
     st.session_state.answers = {}
-    st.session_state.mirror = None
-    st.session_state.mirror_correction = ""
-    st.session_state.show_mirror_correction = False
 
-    st.session_state.action = None
+    st.session_state.analysis = None
+    st.session_state.analysis_correction = ""
+    st.session_state.show_analysis_correction = False
+
+    st.session_state.decision_action = None
     st.session_state.action_correction = ""
     st.session_state.show_action_correction = False
-    st.session_state.action_agreed = False
-    st.session_state.locked_in = False
 
+    st.session_state.locked_in = False
     st.session_state.timer_start = None
     st.session_state.did_it = None
 
@@ -59,15 +59,18 @@ def setv(k, v):
 # =====================
 # AI
 # =====================
-def ai_mirror(answers, correction=None):
+def ai_risk_reward(answers, correction=None):
     system = (
-        "You are a blunt, calm decision mirror.\n"
-        "Rules:\n"
-        "- Speak directly to 'You'. Never say 'user'.\n"
-        "- Plain text only. No HTML, markdown, or symbols.\n"
-        "- Return JSON only with keys: want, act, dont, blocker.\n"
-        "- Each value: 1 sentence, max 22 words.\n"
-        "- Be precise, not motivational.\n"
+        "You are a calm, rational decision analyst.\n"
+        "Speak directly to 'You'. Never say 'user'.\n"
+        "Plain text only. No HTML, markdown, or symbols.\n"
+        "Return JSON ONLY with keys:\n"
+        "risk_reward\n"
+        "The value must be a single, thoughtful paragraph explaining:\n"
+        "- the upside if You act\n"
+        "- the downside if You don't\n"
+        "- the real tradeoff involved\n"
+        "Do not give advice yet.\n"
     )
 
     payload = {
@@ -82,7 +85,7 @@ def ai_mirror(answers, correction=None):
 
     r = get_client().chat.completions.create(
         model="gpt-4.1-mini",
-        temperature=0.2,
+        temperature=0.25,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": json.dumps(payload)},
@@ -91,28 +94,24 @@ def ai_mirror(answers, correction=None):
     return json.loads(r.choices[0].message.content)
 
 
-def ai_next_step(answers, mirror, correction=None):
+def ai_one_action(answers, analysis, correction=None):
     system = (
-        "You are an execution coach.\n"
+        "You are an execution-focused decision guide.\n"
+        "Speak directly to 'You'.\n"
+        "Plain text only.\n"
+        "Return JSON ONLY with keys:\n"
+        "action, minutes\n"
         "Rules:\n"
-        "- Speak directly to 'You'.\n"
-        "- Plain text only.\n"
-        "- Return JSON only with keys:\n"
-        "headline, action, steps, minutes, fits_10, why\n"
-        "- steps: 3–5 concise imperatives.\n"
-        "- minutes must be 10, 15, 20, 30, 45, or 60.\n"
-        "- Decide honestly if this can be done in 10 minutes.\n"
-        "- If fits_10=true, headline should frame it as good news.\n"
+        "- action must be ONE clear decision or action\n"
+        "- no steps, no lists, no explanations\n"
+        "- minutes must be one of: 10, 15, 20, 30, 45, 60\n"
+        "- choose the smallest honest time needed\n"
     )
 
     payload = {
         "decision": answers["decision"],
-        "why_matters": answers["why_matters"],
-        "why_not_yet": answers["why_not_yet"],
-        "if_dont": answers["if_dont"],
-        "if_do": answers["if_do"],
+        "analysis": analysis,
         "values": [answers["value_1"], answers["value_2"], answers["value_3"]],
-        "mirror": mirror,
         "correction": correction,
     }
 
@@ -153,7 +152,7 @@ st.divider()
 # ---------------------
 steps = [
     ("decision", "What decision are You making?", "One sentence."),
-    ("why_matters", "Tell me why this decision matters to You.", "One blunt paragraph."),
+    ("why_matters", "Why does this decision matter to You?", "Be direct."),
     ("why_not_yet", "Why haven’t You done it yet?", "Be honest."),
     ("if_dont", "What happens if You don’t do it?", "3–12 months ahead."),
     ("if_do", "And if You do it now, what happens?", "What improves."),
@@ -165,11 +164,11 @@ if st.session_state.step < 5:
     val = st.text_area("", value=need(key), placeholder=hint, height=120)
     setv(key, val)
 
-    b1, b2 = st.columns([1, 1])
-    with b1:
+    c1, c2 = st.columns([1, 1])
+    with c1:
         if st.session_state.step > 0 and st.button("⬅ Back"):
             go(st.session_state.step - 1)
-    with b2:
+    with c2:
         if st.button("Next ➜"):
             if not val.strip():
                 st.error("Please answer before continuing.")
@@ -177,65 +176,46 @@ if st.session_state.step < 5:
                 go(st.session_state.step + 1)
 
 # ---------------------
-# STEP 6 (values)
+# STEP 6 — Values
 # ---------------------
 elif st.session_state.step == 5:
-    st.subheader("To help me make this decision, I need a little bit of information about You.")
-    st.write("What are the 3 things You value most right now?")
+    st.subheader("What are the 3 things You value most right now?")
+    setv("value_1", st.text_input("Most important", need("value_1")))
+    setv("value_2", st.text_input("Second", need("value_2")))
+    setv("value_3", st.text_input("Third", need("value_3")))
 
-    setv("value_1", st.text_input("Most important", need("value_1"), max_chars=80))
-    setv("value_2", st.text_input("Second", need("value_2"), max_chars=80))
-    setv("value_3", st.text_input("Third", need("value_3"), max_chars=80))
-
-    b1, b2 = st.columns([1, 1])
-    with b1:
-        if st.button("⬅ Back"):
-            go(4)
-    with b2:
-        if st.button("Next ➜"):
-            if not all([need("value_1"), need("value_2"), need("value_3")]):
-                st.error("Fill all three.")
-            else:
-                # Clear downstream state
-                st.session_state.mirror = None
-                st.session_state.action = None
-                st.session_state.action_agreed = False
-                st.session_state.locked_in = False
-                st.session_state.timer_start = None
-                st.session_state.did_it = None
-                go(6)
+    if st.button("Next ➜"):
+        if not all([need("value_1"), need("value_2"), need("value_3")]):
+            st.error("Fill all three.")
+        else:
+            st.session_state.analysis = None
+            st.session_state.decision_action = None
+            go(6)
 
 # ---------------------
-# STEP 7 — Verdict (no templated headers)
+# STEP 7 — Risk & Reward Analysis
 # ---------------------
 elif st.session_state.step == 6:
-    if not st.session_state.mirror:
-        with st.spinner("Thinking clearly…"):
-            st.session_state.mirror = ai_mirror(st.session_state.answers)
+    if not st.session_state.analysis:
+        with st.spinner("Weighing the tradeoff…"):
+            st.session_state.analysis = ai_risk_reward(st.session_state.answers)
 
-    m = st.session_state.mirror
-
-    verdict_text = " ".join([
-        safe_text(m.get("want", "")),
-        safe_text(m.get("act", "")),
-        safe_text(m.get("dont", "")),
-        safe_text(m.get("blocker", "")),
-    ]).strip()
+    analysis_text = safe_text(st.session_state.analysis["risk_reward"])
 
     st.markdown(
         f"""
         <div style="
-            border: 1px solid rgba(255,255,255,0.12);
-            border-radius: 16px;
-            padding: 32px 36px;
-            background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
-            box-shadow: 0 12px 34px rgba(0,0,0,0.38);
+            border:1px solid rgba(255,255,255,0.12);
+            border-radius:16px;
+            padding:32px 36px;
+            background:linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+            box-shadow:0 12px 34px rgba(0,0,0,0.38);
         ">
             <div style="text-align:center;font-size:0.8rem;opacity:0.6;letter-spacing:0.12em;margin-bottom:18px;">
-                VERDICT
+                RISK & REWARD ANALYSIS
             </div>
             <div style="font-size:1.05rem;line-height:1.75;">
-                {verdict_text}
+                {analysis_text}
             </div>
         </div>
         """,
@@ -243,133 +223,70 @@ elif st.session_state.step == 6:
     )
 
     st.divider()
-    b1, b2, b3 = st.columns([1, 2, 2])
-    with b1:
-        if st.button("⬅ Back"):
-            go(5)
-    with b2:
-        if st.button("Yes, you got that right"):
-            go(7)
-    with b3:
-        if st.button("No, not exactly"):
-            st.session_state.show_mirror_correction = True
-
-    if st.session_state.show_mirror_correction:
-        corr = st.text_area("What did I miss? (one blunt correction)", max_chars=200)
-        cc1, cc2 = st.columns([1, 1])
-        with cc1:
-            if st.button("Cancel"):
-                st.session_state.show_mirror_correction = False
-                st.rerun()
-        with cc2:
-            if st.button("Redo"):
-                with st.spinner("Reframing…"):
-                    st.session_state.mirror = ai_mirror(st.session_state.answers, correction=corr)
-                st.session_state.show_mirror_correction = False
-                st.rerun()
-
-# ---------------------
-# STEP 8 — Next action (agree -> lock in)
-# ---------------------
-elif st.session_state.step == 7:
-    st.subheader("Next best step")
-
-    if not st.session_state.action:
-        with st.spinner("Finding the clearest move…"):
-            st.session_state.action = ai_next_step(st.session_state.answers, st.session_state.mirror)
-
-    action = st.session_state.action
-
-    headline = safe_text(action.get("headline", ""))
-    act = safe_text(action.get("action", ""))
-    why = safe_text(action.get("why", ""))
-    minutes = int(action.get("minutes", 10) or 10)
-    fits_10 = bool(action.get("fits_10", False))
-    steps_list = action.get("steps", []) or []
-
-    st.markdown(f"**{headline}**")
-    st.markdown(f"### {act}")
-
-    if fits_10:
-        st.info("Good news: You can complete this in the next **10 minutes** if you decide to lock in.")
-    else:
-        st.info(f"This is still doable — it’ll take about **{minutes} minutes** once you lock in.")
-
-    st.markdown("### Do it like this:")
-    for s in steps_list:
-        st.markdown(f"- {safe_text(s)}")
-
-    if why:
-        st.caption(why)
-
-    st.divider()
-    c1, c2, c3 = st.columns([1, 2, 2])
+    c1, c2 = st.columns([1, 2])
     with c1:
         if st.button("⬅ Back"):
-            go(6)
+            go(5)
     with c2:
-        if st.button("Yes, I agree ✅"):
-            st.session_state.action_agreed = True
-    with c3:
-        if st.button("Not exactly"):
-            st.session_state.show_action_correction = True
-
-    if st.session_state.show_action_correction:
-        corr = st.text_area("What needs adjusting?", max_chars=220)
-        if st.button("Adjust"):
-            with st.spinner("Adjusting…"):
-                st.session_state.action = ai_next_step(
-                    st.session_state.answers, st.session_state.mirror, correction=corr
-                )
-            st.session_state.show_action_correction = False
-            st.rerun()
-
-    if st.session_state.action_agreed:
-        st.divider()
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            if st.button("Lock in now 🔒"):
-                st.session_state.locked_in = True
-                st.session_state.timer_start = time.time()
-                go(8)
-        with c2:
-            if st.button("Maybe later"):
-                st.session_state.did_it = False
-                go(8)
+        if st.button("Continue"):
+            go(7)
 
 # ---------------------
-# STEP 9 — Timer + Outcome (FIXED)
+# STEP 8 — One action
+# ---------------------
+elif st.session_state.step == 7:
+    if not st.session_state.decision_action:
+        with st.spinner("Finding the one move that matters…"):
+            st.session_state.decision_action = ai_one_action(
+                st.session_state.answers,
+                st.session_state.analysis["risk_reward"],
+            )
+
+    action = st.session_state.decision_action
+    minutes = int(action["minutes"])
+
+    st.subheader("The one thing to do now")
+    st.markdown(f"### {safe_text(action['action'])}")
+    st.caption(f"This takes about {minutes} minutes once You lock in.")
+
+    st.divider()
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        if st.button("Lock in 🔒"):
+            st.session_state.locked_in = True
+            st.session_state.timer_start = time.time()
+            go(8)
+    with c2:
+        if st.button("Not right now"):
+            st.session_state.did_it = False
+            go(8)
+
+# ---------------------
+# STEP 9 — Timer & outcome
 # ---------------------
 elif st.session_state.step == 8:
-    action = st.session_state.get("action")
-    if not action:
-        st.error("Action data is missing. Go back one step and continue.")
-        st.stop()
-
-    minutes = int(action.get("minutes", 10) or 10)
+    action = st.session_state.decision_action
+    minutes = int(action["minutes"])
 
     if st.session_state.timer_start:
         elapsed = int(time.time() - st.session_state.timer_start)
         remaining = max(0, minutes * 60 - elapsed)
 
         st_autorefresh(interval=1000, key="tick")
-
         st.markdown(f"⏳ **{remaining//60:02d}:{remaining%60:02d} remaining**")
 
         c1, c2 = st.columns([1, 1])
         with c1:
-            if st.button("I did it ✅"):
+            if st.button("I did it"):
                 st.session_state.did_it = True
         with c2:
             if st.button("I didn’t do it"):
                 st.session_state.did_it = False
 
     if st.session_state.did_it is True:
-        st.success("Good. You acted. That’s how You get closer to what You said matters.")
+        st.success("Good. You acted. That’s how momentum is built.")
     elif st.session_state.did_it is False:
-        st.info("That’s fine. It simply means this doesn’t matter to You right now. Revisit it when it becomes urgent.")
+        st.info("That’s fine. It simply means this doesn’t matter to You right now.")
 
-    st.divider()
-    if st.button("Run another decision ➜"):
+    if st.button("Run another decision"):
         reset_all()
-        go(0)
